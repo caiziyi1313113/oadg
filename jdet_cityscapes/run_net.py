@@ -26,6 +26,7 @@ if os.path.isdir(DEFAULT_JDET_PY) and DEFAULT_JDET_PY not in sys.path:
 import datasets.repeat_dataset  # noqa: F401
 import datasets.resize_by_img_scale  # noqa: F401
 import datasets.cityscapes_dataset  # noqa: F401
+import datasets.oa_mix  # noqa: F401
 import models.hbb_head  # noqa: F401
 import models.faster_rcnn_hbb  # noqa: F401
 
