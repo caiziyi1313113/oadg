@@ -287,15 +287,18 @@ class FasterRCNNHBB(nn.Module):
         scale_factor = []
         for target in targets:
             ori_img_size = target['ori_img_size']
+            img_size = target.get('img_size', ori_img_size)
+            pad_shape = target.get('pad_shape', img_size)
+            # meta uses (h, w)
             meta = dict(
                 ori_shape=(ori_img_size[1], ori_img_size[0]),
-                img_shape=(ori_img_size[1], ori_img_size[0]),
-                pad_shape=(ori_img_size[1], ori_img_size[0]),
+                img_shape=(img_size[1], img_size[0]),
+                pad_shape=(pad_shape[1], pad_shape[0]),
                 scale_factor=target.get('scale_factor', 1.0),
                 img_file=target.get('img_file', target.get('filename', ''))
             )
             img_meta.append(meta)
-            img_shape.append((target['img_size'][1], target['img_size'][0]))
+            img_shape.append((img_size[1], img_size[0]))
             scale_factor.append(target.get('scale_factor', 1.0))
 
         x = self.backbone(images)
