@@ -395,3 +395,129 @@ class SharedFCBBoxHeadHBB(ConvFCBBoxHeadHBB):
             fc_out_channels=fc_out_channels,
             *args,
             **kwargs)
+
+
+@HEADS.register_module()
+class Shared2FCContrastiveHeadHBB(ConvFCBBoxHeadHBB):
+    """Shared 2FC head with contrastive branch (OA-Loss)."""
+
+    def __init__(self,
+                 with_cont=True,
+                 cont_predictor_cfg=dict(num_linear=2, feat_channels=256, return_relu=True),
+                 out_dim_cont=256,
+                 loss_cont=dict(type='ContrastiveLossPlus', loss_weight=0.01, num_views=2, temperature=0.07),
+                 num_fcs=2,
+                 fc_out_channels=1024,
+                 *args,
+                 **kwargs):
+        assert num_fcs >= 1
+        super().__init__(
+            num_shared_convs=0,
+            num_shared_fcs=num_fcs,
+            num_cls_convs=0,
+            num_cls_fcs=0,
+            num_reg_convs=0,
+            num_reg_fcs=0,
+            fc_out_channels=fc_out_channels,
+            *args,
+            **kwargs)
+        self.with_cont = with_cont
+        self.cont_predictor_cfg = cont_predictor_cfg
+        self.out_dim_cont = out_dim_cont
+        self.loss_cont = build_from_cfg(loss_cont, LOSSES)
+        if self.with_cont:
+            self.fc_cont = self._add_linear_relu(in_channels=self.cls_last_dim,
+                                                 **self.cont_predictor_cfg)
+
+    def _add_linear_relu(self, num_linear, in_channels, feat_channels, return_relu=False):
+        layers = []
+        num_relu = num_linear if return_relu else num_linear - 1
+        for i in range(num_linear):
+            in_c = in_channels if i == 0 else feat_channels
+            layers.append(nn.Linear(in_c, feat_channels))
+            if i < num_relu - 1:
+                layers.append(nn.ReLU())
+        return nn.Sequential(*layers)
+
+    def execute(self, x):
+        # shared part
+        if self.num_shared_convs > 0:
+            for conv in self.shared_convs:
+                x = conv(x)
+
+        if self.num_shared_fcs > 0:
+            if self.with_avg_pool:
+                x = self.avg_pool(x)
+            x = x.view(x.size(0), -1)
+            for fc in self.shared_fcs:
+                x = self.relu(fc(x))
+
+        x_cls = x
+        x_reg = x
+        x_cont = x
+
+        for conv in self.cls_convs:
+            x_cls = conv(x_cls)
+        if x_cls.ndim > 2:
+            if self.with_avg_pool:
+                x_cls = self.avg_pool(x_cls)
+            x_cls = x_cls.view(x_cls.size(0), -1)
+        for fc in self.cls_fcs:
+            x_cls = self.relu(fc(x_cls))
+
+        for conv in self.reg_convs:
+            x_reg = conv(x_reg)
+        if x_reg.ndim > 2:
+            if self.with_avg_pool:
+                x_reg = self.avg_pool(x_reg)
+            x_reg = x_reg.view(x_reg.size(0), -1)
+        for fc in self.reg_fcs:
+            x_reg = self.relu(fc(x_reg))
+
+        self.cls_feats = x_cls
+
+        cls_score = self.fc_cls(x_cls) if self.with_cls else None
+        bbox_pred = self.fc_reg(x_reg) if self.with_reg else None
+        cont_feats = self.fc_cont(x_cont) if self.with_cont else None
+        return cls_score, bbox_pred, cont_feats
+
+    def loss(self,
+             cls_score,
+             bbox_pred,
+             cont_feats,
+             labels,
+             label_weights,
+             bbox_targets,
+             bbox_weights,
+             reduce=True,
+             labels_cont=None):
+        losses = dict()
+        if cls_score is not None:
+            reduction_override = "mean" if reduce else "none"
+            losses['loss_cls'] = self.loss_cls(
+                cls_score, labels, label_weights, reduction_override=reduction_override)
+            losses['acc'] = accuracy(cls_score, labels)
+        if bbox_pred is not None:
+            pos_inds = labels > 0
+            if self.reg_class_agnostic:
+                pos_bbox_pred = bbox_pred.view(bbox_pred.size(0), 4)[pos_inds]
+            else:
+                pos_bbox_pred = bbox_pred.view(bbox_pred.size(0), -1, 4)[pos_inds, labels[pos_inds]]
+            losses['loss_bbox'] = self.loss_bbox(
+                pos_bbox_pred,
+                bbox_targets[pos_inds],
+                bbox_weights[pos_inds],
+                avg_factor=bbox_targets.size(0))
+
+        if cont_feats is not None:
+            if labels_cont is None:
+                labels_cont = labels
+            if cont_feats.shape[0] != labels_cont.shape[0]:
+                raise ValueError(
+                    f"cont_feats and labels_cont length mismatch: "
+                    f"{cont_feats.shape[0]} vs {labels_cont.shape[0]}"
+                )
+            labels_cont = labels_cont.view(-1, 1)
+            loss_cont = self.loss_cont(cont_feats, labels_cont)
+            losses['loss_cont'] = loss_cont
+        return losses

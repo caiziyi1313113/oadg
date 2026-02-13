@@ -301,8 +301,8 @@ class OAMix:
 
         self.num_views = num_views
         self.keep_orig = keep_orig
-        if self.num_views != 1:
-            warnings.warn('JDet OAMix only supports num_views=1. extra views are ignored.')
+        if self.num_views == 1 and self.keep_orig:
+            warnings.warn('No augmentation will be applied since num_views=1 and keep_orig=True')
 
         self.severity = severity
         self.aug_prob_coeff = 1.0
@@ -443,14 +443,40 @@ class OAMix:
     def __call__(self, image, target=None):
         if target is None or 'bboxes' not in target:
             return image, target
-        if self.num_views != 1:
-            raise NotImplementedError('JDet OAMix only supports num_views=1')
 
         self._history = {}
-        if not self.keep_orig:
-            img_np = np.asarray(image, dtype=np.uint8)
-            img_np = self.oamix(img_np, target['bboxes'].copy())
-            image = Image.fromarray(img_np)
+
+        if self.num_views <= 1:
+            if not self.keep_orig:
+                img_np = np.asarray(image, dtype=np.uint8)
+                img_np = self.oamix(img_np, target['bboxes'].copy())
+                image = Image.fromarray(img_np)
+            return image, target
+
+        # multi-view: keep original as img, generate img2
+        img_np = np.asarray(image, dtype=np.uint8)
+        img_aug = self.oamix(img_np, target['bboxes'].copy())
+        if self.keep_orig:
+            target['img2'] = Image.fromarray(np.asarray(img_aug, dtype=np.uint8))
+        else:
+            # swap: use aug as primary, store orig as img2
+            target['img2'] = Image.fromarray(img_np.copy())
+            image = Image.fromarray(np.asarray(img_aug, dtype=np.uint8))
+
+        # duplicate labels/boxes for view2
+        target['bboxes2'] = target['bboxes'].copy()
+        target['labels2'] = target['labels'].copy()
+
+        # store oamix/meta boxes for random proposals
+        if 'random_box_list' in self._history and len(self._history['random_box_list']) > 0:
+            target['multilevel_boxes'] = self._history['random_box_list'].copy()
+        else:
+            target['multilevel_boxes'] = np.zeros((0, 4), dtype=np.float32)
+        if 'oa_random_box_list' in self._history and len(self._history['oa_random_box_list']) > 0:
+            target['oamix_boxes'] = np.stack(self._history['oa_random_box_list'], axis=0).astype(np.float32)
+        else:
+            target['oamix_boxes'] = np.zeros((0, 4), dtype=np.float32)
+
         return image, target
 
     def oamix(self, img, gt_bboxes):
