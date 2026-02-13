@@ -19,7 +19,7 @@ class ResizeByImgScale:
         self.keep_ratio = keep_ratio
 
     def _resize_boxes(self, target, size):
-        for key in ["bboxes", "polys"]:
+        for key in ["bboxes", "polys", "bboxes2", "polys2"]:
             if key not in target:
                 continue
             bboxes = target[key]
@@ -55,6 +55,19 @@ class ResizeByImgScale:
         else:
             image = Image.fromarray(image.transpose(1, 2, 0))
             image = image.resize((new_w, new_h), Image.BILINEAR)
+
+        # resize extra view if present
+        if target is not None and 'img2' in target:
+            img2 = target['img2']
+            if isinstance(img2, Image.Image):
+                img2 = img2.resize((new_w, new_h), Image.BILINEAR)
+            else:
+                if img2.ndim == 3 and img2.shape[0] in (1, 3) and img2.shape[-1] not in (1, 3):
+                    img2 = Image.fromarray(img2.transpose(1, 2, 0))
+                else:
+                    img2 = Image.fromarray(img2)
+                img2 = img2.resize((new_w, new_h), Image.BILINEAR)
+            target['img2'] = img2
 
         if target is not None:
             self._resize_boxes(target, (new_w, new_h))

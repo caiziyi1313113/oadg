@@ -63,11 +63,34 @@ def get_coco_style_results(filename, task="bbox", metric=None, prints="mPC", agg
     num_distortions = len(list(eval_output.keys()))
     results = np.zeros((num_distortions, 6, len(metrics)), dtype="float32")
 
+    # detect metric key style
+    sample_dist = next(iter(eval_output.values()))
+    sample_sev = next(iter(sample_dist.values()))
+    sample_task = sample_sev.get(task, {})
+    use_bbox_map = "bbox_mAP" in sample_task
+    bbox_metric_map = {
+        "AP": "bbox_mAP",
+        "AP50": "bbox_mAP_50",
+        "AP75": "bbox_mAP_75",
+        "APs": "bbox_mAP_s",
+        "APm": "bbox_mAP_m",
+        "APl": "bbox_mAP_l",
+    }
+
     for corr_i, distortion in enumerate(eval_output):
         for severity in eval_output[distortion]:
+            sev_i = int(severity)
             for metric_j, metric_name in enumerate(metrics):
-                mAP = eval_output[distortion][severity][task][metric_name]
-                results[corr_i, severity, metric_j] = mAP
+                if use_bbox_map:
+                    key = bbox_metric_map.get(metric_name, None)
+                    if key is None:
+                        # AR metrics not provided in JDet bbox_mAP output
+                        mAP = 0.0
+                    else:
+                        mAP = eval_output[distortion][severity][task].get(key, 0.0)
+                else:
+                    mAP = eval_output[distortion][severity][task][metric_name]
+                results[corr_i, sev_i, metric_j] = mAP
 
     P = results[0, 0, :]
     if aggregate == "benchmark":

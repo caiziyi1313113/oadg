@@ -29,6 +29,8 @@ import datasets.cityscapes_dataset  # noqa: F401
 import datasets.oa_mix  # noqa: F401
 import models.hbb_head  # noqa: F401
 import models.faster_rcnn_hbb  # noqa: F401
+import models.faster_rcnn_hbb_multi  # noqa: F401
+import models.oadg_losses  # noqa: F401
 
 # 导入训练入口：Runner 和配置初始
 # 你的训练/验证/测试的控制器（封装了 run/val/test 等流程）
