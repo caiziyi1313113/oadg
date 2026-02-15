@@ -102,7 +102,8 @@ def _supcontrast(features, labels, num_views=2, temper=0.07, min_samples=10):
 
     fg_count = int((labels != 0).sum().item())
     if fg_count <= min_samples:
-        return jt.array(0.0)
+        # Keep a tiny gradient path for the contrastive head on sparse-foreground batches.
+        return (features * features).mean() * 1e-6
 
     mask_fg = jt.matmul(fg, fg.transpose(0, 1))
     mask_eye = _eye(batch_size, dtype=jt.float32)
@@ -120,8 +121,12 @@ def _supcontrast(features, labels, num_views=2, temper=0.07, min_samples=10):
 
     exp_logits = jt.exp(logits) * mask_contrast
     log_prob = logits - jt.log(exp_logits.sum(dim=1, keepdims=True) + 1e-12)
-    mean_log_prob_pos = (mask_anchor * log_prob).sum(dim=1) / (mask_anchor.sum(dim=1) + 1e-8)
-    loss = -mean_log_prob_pos.mean()
+    pos_per_anchor = mask_anchor.sum(dim=1)
+    valid = (pos_per_anchor > 0).float()
+    if int(valid.sum().item()) == 0:
+        return (features * features).mean() * 1e-6
+    mean_log_prob_pos = (mask_anchor * log_prob).sum(dim=1) / (pos_per_anchor + 1e-8)
+    loss = -(mean_log_prob_pos * valid).sum() / jt.maximum(valid.sum(), jt.array(1.0, dtype=valid.dtype))
     return loss
 
 

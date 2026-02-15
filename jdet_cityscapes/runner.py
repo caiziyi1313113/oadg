@@ -7,6 +7,12 @@ from jdet.utils.general import parse_losses, sync, check_interval
 
 class Runner(JDetRunner):
     """Runner with optional iter-based checkpointing."""
+    def __init__(self):
+        super().__init__()
+        # If resuming, keep the config's max_iter (not the checkpoint's).
+        if self.max_epoch is None and self.cfg.max_iter is not None:
+            self.max_iter = self.cfg.max_iter
+            self.total_iter = self.max_iter
 
     def train(self):
         self.model.train()

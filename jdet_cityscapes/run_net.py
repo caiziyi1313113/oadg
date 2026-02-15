@@ -30,6 +30,9 @@ import datasets.oa_mix  # noqa: F401
 import models.hbb_head  # noqa: F401
 import models.faster_rcnn_hbb  # noqa: F401
 import models.faster_rcnn_hbb_multi  # noqa: F401
+import models.fdd_modules  # noqa: F401
+import models.faster_rcnn_hbb_fdd  # noqa: F401
+import models.param_groups  # noqa: F401
 import models.oadg_losses  # noqa: F401
 
 # 导入训练入口：Runner 和配置初始
