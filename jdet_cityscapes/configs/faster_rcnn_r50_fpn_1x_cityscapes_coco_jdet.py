@@ -179,11 +179,11 @@ model = dict(
 # 注意这里的加载权重是整个detector级别的，而之前的pretrain是仅有后端初始化
 # NOTE: The DOTA FasterRCNN premodel has mismatched class heads (16 classes).
 # Use backbone-only pretrain (modelzoo://resnet50) and skip detector-level load.
-pretrained_weights = "./minimal_jdet.pkl"  # 这是你转换后的 JDet pkl 权重路径
+pretrained_weights = None  # 这是你转换后的 JDet pkl 权重路径
 #load_from = './premodel/FasterRCNN-R50-FPN.pkl'  # noqa F401
 # Note: do not print here; it runs on import and can be misleading in eval scripts.
 # dataset settings
-
+resume_path = "/mnt/d/sim2real/OA-DG/jdet_cityscapes/work_dirs/faster_rcnn_r50_fpn_cityscapes_coco_jdet/checkpoints/ckpt_16.pkl"
 # 定义 train/val/test 的数据集构建方式
 # dataset settings (MMDet-style layout, mapped to JDet COCODataset)
 dataset_type = 'CityscapesDataset'
@@ -213,7 +213,7 @@ dataset = dict(
             use_anno_cats=False,
         transforms=train_pipeline,
         batch_size=1,
-        num_workers=1,
+        num_workers=2,
         shuffle=True,
     ),
     val=dict(
@@ -258,9 +258,8 @@ logger = dict(type='RunLogger')
 
 # runtime settings
 # 使iter级别
-max_iter = 47600
+max_iter = 50000 
 max_epoch = None
-resume_path = ""
 
 # run a val epoch once after training finishes (epoch increments when loop ends)
 eval_interval = 1

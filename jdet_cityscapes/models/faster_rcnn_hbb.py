@@ -77,6 +77,10 @@ class FasterRCNNHBB(nn.Module):
             else:
                 if img2.ndim == 3 and img2.shape[-1] in (1, 3):
                     img2 = img2.transpose((2, 0, 1))
+            if img2.ndim == 2:
+                img2 = img2[None, ...]
+            if img2.shape[0] == 1:
+                img2 = np.repeat(img2, 3, axis=0)
             imgs2.append(img2.astype(np.float32))
             t2 = dict(t)
             t2['bboxes'] = t.get('bboxes2', t.get('bboxes'))

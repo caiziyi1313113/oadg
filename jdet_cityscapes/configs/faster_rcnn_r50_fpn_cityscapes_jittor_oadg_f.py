@@ -36,13 +36,13 @@ random_proposal_cfg = dict(
 
 # experiment naming / logging
 # 训练输出目录和数据集目录
-name = "faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg"
+name = "faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg_f"
 
 if os.name == "nt":
-    work_dir = r"D:\sim2real\OA-DG\jdet_cityscapes\work_dirs\faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg"
+    work_dir = r"D:\sim2real\OA-DG\jdet_cityscapes\work_dirs\faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg_f"
     cityscapes_root = r"D:\sim2real\OA-DG\ws\data\cityscapes"
 else:
-    work_dir = "/mnt/d/sim2real/OA-DG/jdet_cityscapes/work_dirs/faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg"
+    work_dir = "/mnt/d/sim2real/OA-DG/jdet_cityscapes/work_dirs/faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg_f"
     cityscapes_root = "/mnt/d/sim2real/OA-DG/ws/data/cityscapes"
 
 # data paths
@@ -58,7 +58,7 @@ val_ann = os.path.join(cityscapes_root, 'annotations', 'instancesonly_filtered_g
 # model 字典：定义整个检测模型（这是配置的核心）
 model = dict(
     # 自定义/扩展的 OBB FasterRCNN 版本
-    type='FasterRCNNHBB',
+    type='FasterRCNNHBBFDD',
     # 告诉 backbone 用 resnet50 的预训练（来自 JDet 模型 zoo）
     pretrained='modelzoo://resnet50',
     # backbone 的配置
@@ -132,6 +132,39 @@ model = dict(
         loss_bbox=dict(type='SmoothL1LossPlus', beta=1.0, loss_weight=1.0, num_views=num_views),
         loss_cont=dict(type='ContrastiveLossPlus', loss_weight=lw_cont, num_views=num_views, temperature=temperature),
     ),
+    fdd_cfg=dict(
+        type='FDDFilter',
+        in_channels=3,
+        base_size=(1024, 2048),
+        use_sigmoid=False,
+        # Filter#3 (paper): FFT -> 1x1 conv -> ReLU -> 1x1 conv (residual on amplitude) -> IFFT
+        filter_type='conv',
+        conv_hidden=16,
+        complex_mul_fallback=True,
+        backend='complex',
+        spatial_kernel=7,
+        spatial_init='avg',
+        grl_lambda=0.0,
+        eps=1e-6,
+    ),
+    fdd_loss_cfg=dict(
+        temperature=0.2,
+        loss_weight_img=1.0,
+        # Keep instance loss lightweight; ROI SupCon is now label-aware.
+        loss_weight_ins=0.05,
+        loss_weight_reg=1e-6,
+        loss_ins_cap=20.0,
+        two_side=True,
+        use_instance=True,
+        # Use input-level projections to avoid two extra backbone forward graphs.
+        img_from_input=True,
+        ins_from_input=True,
+        img_proj_in_channels=3,
+        ins_max_rois=64,
+        proj_dim=128,
+        proj_in_channels=256,
+    ),
+    fdd_detach=True,
     # train_cfg：训练阶段的 assign / sample / nms 等策略
     # 正负样本 IoU 阈值
     # 每张图采多少 anchors（256）以及正样本比例（0.5）
@@ -150,7 +183,7 @@ model = dict(
             ),
             sampler=dict(
                 type='RandomSampler',
-                num=256,
+                num=128,
                 pos_fraction=0.5,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False,
@@ -179,7 +212,7 @@ model = dict(
             ),
             sampler=dict(
                 type='RandomSampler',
-                num=512,
+                num=256,
                 pos_fraction=0.25,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=True,
@@ -213,12 +246,12 @@ model = dict(
 # NOTE: The DOTA FasterRCNN premodel has mismatched class heads (16 classes).
 # Use backbone-only pretrain (modelzoo://resnet50) and skip detector-level load.
 # set to None when you want to resume from checkpoints
-pretrained_weights = None
+pretrained_weights = "/mnt/d/sim2real/OA-DG/jdet_cityscapes/minimal_jdet.pkl"
 #load_from = './premodel/FasterRCNN-R50-FPN.pkl'  # noqa F401
 # Note: do not print here; it runs on import and can be misleading in eval scripts.
 # dataset settings
 # resume_path can be set to a specific ckpt; None -> auto search latest in work_dir
-resume_path = "/mnt/d/sim2real/OA-DG/jdet_cityscapes/work_dirs/faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg/ckpt_16.pkl"
+resume_path = None
 # 定义 train/val/test 的数据集构建方式
 # dataset settings (MMDet-style layout, mapped to JDet COCODataset)
 dataset_type = 'CityscapesDataset'
@@ -226,7 +259,7 @@ data_root = cityscapes_root
 
 # JDet uses transforms (not mmdet pipelines). Keep equivalent ops here.
 train_pipeline = [
-    dict(type='ResizeByImgScale', img_scale=[(2048, 800), (2048, 1024)], keep_ratio=True),
+    dict(type='ResizeByImgScale', img_scale=[(1024, 512), (1280, 640)], keep_ratio=True),
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
     dict(
         type='OAMix',
@@ -287,11 +320,18 @@ dataset = dict(
 )
 
 optimizer = dict(
-    type='SGD',
+    type='GradMutilpySGD',
     lr=0.00125,
     momentum=0.9,
     weight_decay=0.0001,
     grad_clip=dict(max_norm=35, norm_type=2),
+)
+
+parameter_groups_generator = dict(
+    type='FDDParamGroups',
+    fdd_key='fdd',
+    fdd_grad_mult=1.0,
+    fdd_weight_decay=None,
 )
 
 scheduler = dict(
