@@ -59,6 +59,11 @@ def parse_args():
         default="corrupted",
         help="use original dataset with online corruption or prebuilt corrupted dataset",
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="do not load existing --out file and always recompute all settings",
+    )
     parser.add_argument("--no_cuda", action="store_true")
     return parser.parse_args()
 
@@ -83,6 +88,28 @@ def _run_eval(model, dataset, work_dir, epoch):
         results.extend([(r, t) for r, t in zip(sync(result), sync(targets))])
     eval_results = dataset.evaluate(results, work_dir, epoch, logger="print")
     return eval_results, results
+
+
+def _load_existing_results(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r") as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        return {}
+
+    normalized = {}
+    for corruption, sev_dict in raw.items():
+        if not isinstance(sev_dict, dict):
+            continue
+        normalized[corruption] = {}
+        for severity, payload in sev_dict.items():
+            try:
+                sev_key = int(severity)
+            except (TypeError, ValueError):
+                continue
+            normalized[corruption][sev_key] = payload
+    return normalized
 
 
 def main():
@@ -134,15 +161,39 @@ def main():
     else:
         corruptions = args.corruptions
 
-    model = _load_model(cfg, args.checkpoint)
     aggregated_results = {}
+    if not args.no_resume:
+        try:
+            aggregated_results = _load_existing_results(args.out)
+            if aggregated_results:
+                done_count = sum(len(v) for v in aggregated_results.values())
+                print(f"Loaded existing results from {args.out} (entries={done_count})")
+        except Exception as e:
+            print(f"Failed to load existing results from {args.out}: {e}")
+            print("Proceeding with a fresh run.")
+            aggregated_results = {}
+
+    model = _load_model(cfg, args.checkpoint)
 
     for corr_i, corruption in enumerate(corruptions):
-        aggregated_results[corruption] = {}
+        if corruption not in aggregated_results:
+            aggregated_results[corruption] = {}
         for severity in args.severities:
-            if corr_i > 0 and severity == 0:
-                aggregated_results[corruption][0] = aggregated_results[corruptions[0]][0]
+            if severity in aggregated_results[corruption]:
+                print(f"\nSkipping {corruption} at severity {severity} (already done)")
                 continue
+
+            if corr_i > 0 and severity == 0:
+                first_corr_clean = aggregated_results.get(corruptions[0], {}).get(0)
+                if first_corr_clean is not None:
+                    aggregated_results[corruption][0] = first_corr_clean
+                    print(
+                        f"\nSkipping {corruption} at severity 0 "
+                        f"(reusing clean result from {corruptions[0]})"
+                    )
+                    with open(args.out, "w") as f:
+                        json.dump(aggregated_results, f, indent=2)
+                    continue
 
             test_cfg = copy.deepcopy(cfg.dataset.test)
             if args.load_dataset == "corrupted":

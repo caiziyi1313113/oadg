@@ -65,6 +65,25 @@ def compute_metrics(data, metric_key, severities, corruptions=None):
     return per_corr, overall, missing
 
 
+def compute_clean(data, metric_key, corruption_list, severity=0):
+    per_corr = {}
+    vals = []
+    missing = []
+    sev_key = str(severity)
+
+    for corr in corruption_list:
+        corr_data = data.get(corr, {})
+        val = _get_metric(corr_data.get(sev_key), metric_key)
+        per_corr[corr] = val
+        if val is None:
+            missing.append((corr, severity))
+            continue
+        vals.append(float(val))
+
+    overall = sum(vals) / len(vals) if vals else None
+    return per_corr, overall, missing
+
+
 def compute_domains(per_corr, available_corrs):
     domain_out = {}
     for domain, corr_list in DOMAIN_GROUPS.items():
@@ -92,6 +111,12 @@ def parse_args():
         help="severity levels to aggregate (default: 1..5)",
     )
     parser.add_argument(
+        "--clean-severity",
+        type=int,
+        default=0,
+        help="severity index used as clean metric P (default: 0)",
+    )
+    parser.add_argument(
         "--corruptions",
         type=str,
         nargs="+",
@@ -111,22 +136,41 @@ def main():
     per_corr, overall, missing = compute_metrics(
         data, args.metric, args.severities, corruptions=args.corruptions
     )
+    clean_per_corr, clean_overall, clean_missing = compute_clean(
+        data, args.metric, args.corruptions, severity=args.clean_severity
+    )
     domains = compute_domains(per_corr, set(args.corruptions))
+    if clean_overall is None or clean_overall == 0:
+        rpc = None
+    else:
+        rpc = overall / clean_overall if overall is not None else None
 
     result = {
         "input": str(inp),
         "metric": args.metric,
         "severities": args.severities,
+        "clean_severity": args.clean_severity,
+        "P": clean_overall,
+        "rPC": rpc,
+        "clean": {
+            "overall": clean_overall,
+            "per_corruption": clean_per_corr,
+        },
         "corruptions": per_corr,
         "domains": domains,
         "mPC": overall,
         "missing": missing,
+        "missing_clean": clean_missing,
     }
 
     out.write_text(json.dumps(result, indent=2))
     print(f"Saved: {out}")
     if overall is not None:
         print(f"mPC({args.metric}) = {overall:.6f}")
+    if clean_overall is not None:
+        print(f"P(clean@{args.clean_severity}, {args.metric}) = {clean_overall:.6f}")
+    if rpc is not None:
+        print(f"rPC({args.metric}) = {rpc:.6f}")
     if domains:
         for name, stats in domains.items():
             print(f"{name}: {stats['mean']}")

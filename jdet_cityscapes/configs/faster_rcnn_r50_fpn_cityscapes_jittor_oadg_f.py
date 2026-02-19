@@ -145,11 +145,14 @@ model = dict(
         spatial_kernel=7,
         spatial_init='avg',
         grl_lambda=0.0,
+        # Keep frequency response close to identity to avoid over-filtering.
+        residual_scale=0.25,
         eps=1e-6,
     ),
     fdd_loss_cfg=dict(
         temperature=0.2,
-        loss_weight_img=1.0,
+        # Lower image-level contrastive pressure to reduce conflict with detection.
+        loss_weight_img=0.3,
         # Keep instance loss lightweight; ROI SupCon is now label-aware.
         loss_weight_ins=0.05,
         loss_weight_reg=1e-6,
@@ -164,7 +167,8 @@ model = dict(
         proj_dim=128,
         proj_in_channels=256,
     ),
-    fdd_detach=True,
+    # Let detection gradients also constrain FDD to avoid representation drift.
+    fdd_detach=False,
     # train_cfg：训练阶段的 assign / sample / nms 等策略
     # 正负样本 IoU 阈值
     # 每张图采多少 anchors（256）以及正样本比例（0.5）
@@ -183,7 +187,7 @@ model = dict(
             ),
             sampler=dict(
                 type='RandomSampler',
-                num=128,
+                num=256,#128,
                 pos_fraction=0.5,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False,
@@ -212,7 +216,7 @@ model = dict(
             ),
             sampler=dict(
                 type='RandomSampler',
-                num=256,
+                num=512,#256
                 pos_fraction=0.25,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=True,
@@ -246,7 +250,7 @@ model = dict(
 # NOTE: The DOTA FasterRCNN premodel has mismatched class heads (16 classes).
 # Use backbone-only pretrain (modelzoo://resnet50) and skip detector-level load.
 # set to None when you want to resume from checkpoints
-pretrained_weights = "/mnt/d/sim2real/OA-DG/jdet_cityscapes/minimal_jdet.pkl"
+pretrained_weights = None
 #load_from = './premodel/FasterRCNN-R50-FPN.pkl'  # noqa F401
 # Note: do not print here; it runs on import and can be misleading in eval scripts.
 # dataset settings
@@ -259,7 +263,8 @@ data_root = cityscapes_root
 
 # JDet uses transforms (not mmdet pipelines). Keep equivalent ops here.
 train_pipeline = [
-    dict(type='ResizeByImgScale', img_scale=[(1024, 512), (1280, 640)], keep_ratio=True),
+    # Match OADG training resolution; this is important for Cityscapes small targets.
+    dict(type='ResizeByImgScale', img_scale=[(2048, 800), (2048, 1024)], keep_ratio=True),
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
     dict(
         type='OAMix',
