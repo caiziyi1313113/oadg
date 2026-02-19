@@ -143,6 +143,7 @@ class FDDFilter(nn.Module):
         spatial_kernel=7,
         spatial_init="avg",
         grl_lambda=0.0,
+        residual_scale=1.0,
         eps=1e-6,
     ):
         super().__init__()
@@ -152,6 +153,7 @@ class FDDFilter(nn.Module):
         self.filter_type = filter_type
         self.backend_req = backend
         self.grl_lambda = float(grl_lambda)
+        self.residual_scale = max(float(residual_scale), 0.0)
         self.eps = float(eps)
         self.spatial_kernel = int(spatial_kernel)
         # Keep arg for config compatibility; complex branch now uses explicit real/imag ops.
@@ -238,8 +240,9 @@ class FDDFilter(nn.Module):
             delta = self.freq_conv2(nn.relu(self.freq_conv1(amp)))
             if self.grl_lambda > 0:
                 delta = grad_reverse(delta, self.grl_lambda)
-            # Bounded residual gain in [0, 2] keeps training stable.
-            scale = 1.0 + jt.tanh(delta)
+            # Identity-centered bounded residual gain.
+            # residual_scale=1.0 recovers the original [0, 2] range.
+            scale = 1.0 + self.residual_scale * jt.tanh(delta)
             if self.use_sigmoid:
                 scale = scale.sigmoid()
 
