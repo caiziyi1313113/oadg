@@ -1,20 +1,21 @@
 ## 目录
-JDet/
-├── jdet_cityscapes/
-│   ├── configs/                   # 配置文件目录
-│   ├── datasets/                 # 数据集相关代码
-│   ├── models/                   # 模型定义
-│   ├── tools/                       # 工具类脚本
-│   ├── work_dirs/               # 训练输出目录
-│   ├── minimal_jdet.pkl      # 预训练权重文件
-│   ├── run_net.py                # 主运行入口
-│   ├── runner.py                 # 训练/测试调度器
-│
-└── ws/
-    └── data/
-        ├── cityscapes/           # Cityscapes数据集
-        ├── S-DGOD/               # S-DGOD数据集
-        └── external/             # 外部数据
+├── JDet/ 
+├── data/                    # 数据集目录（独立于代码，防止 Git 误传）
+│   ├── cityscapes/          # Cityscapes 数据集文件
+│   ├── S-DGOD/              # S-DGOD 数据集文件
+│   └── external/            # 其他外部数据
+├── jdet_cityscapes/         # 核心源代码包
+│   ├── configs/             # 各种模型配置文件 (.py / .yaml)
+│   ├── datasets/            # 数据集加载逻辑 (Jittor Dataset 实现)
+│   ├── models/              # 模型定义 (Backbone, Head, Loss 等)
+│   ├── tools/               # 辅助工具脚本 (可视化、转换脚本等)
+│   └── runner.py            # 训练/测试的核心调度器逻辑
+├── pretrained/              # 存放预训练模型权重
+│   └── minus_jdet.pkl       # 你的权重文件放这里
+├── work_dirs/               # 训练实验结果 (日志、检查点、可视化)
+├── run_net.py               # 项目主入口（放在根目录最方便运行）
+├── requirements.txt         # 依赖清单
+└── .gitignore               # 忽略 work_dirs 和 data 等大文件
 
 ### 1.1 建议用独立虚拟环境
 
