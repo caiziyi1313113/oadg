@@ -43,7 +43,7 @@ def compute_metrics(data, metric_key, severities, corruptions=None):
     corruptions = corruptions or list(data.keys())
     missing = []
     per_corr = {}
-    all_values = []
+    corr_means = []
 
     for corr in corruptions:
         corr_data = data.get(corr, {})
@@ -55,13 +55,17 @@ def compute_metrics(data, metric_key, severities, corruptions=None):
                 missing.append((corr, s))
                 continue
             vals.append(float(val))
-            all_values.append(float(val))
+        corr_mean = sum(vals) / len(vals) if vals else None
+        if corr_mean is not None:
+            corr_means.append(corr_mean)
         per_corr[corr] = {
-            "mean": sum(vals) / len(vals) if vals else None,
+            "mean": corr_mean,
             "values": {str(s): _get_metric(corr_data.get(str(s)), metric_key) for s in severities},
         }
 
-    overall = sum(all_values) / len(all_values) if all_values else None
+    # Paper formula: mPC = (1/Nc) * sum_c ((1/Ns) * sum_s P_{c,s})
+    # Use equal weight for each corruption by averaging per-corruption means.
+    overall = sum(corr_means) / len(corr_means) if corr_means else None
     return per_corr, overall, missing
 
 

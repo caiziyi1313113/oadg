@@ -194,7 +194,7 @@ data_root = cityscapes_root
 
 # JDet uses transforms (not mmdet pipelines). Keep equivalent ops here.
 train_pipeline = [
-    dict(type='ResizeByImgScale', img_scale=[(1600, 900), (1024, 512)], keep_ratio=True),
+    dict(type='ResizeByImgScale', img_scale=[(2048,800),(2048,1024)], keep_ratio=True),
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
     dict(
         type='OAMix',

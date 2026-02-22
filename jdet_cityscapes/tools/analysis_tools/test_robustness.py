@@ -2,6 +2,7 @@ import argparse
 import copy
 import json
 import os
+import shutil
 import sys
 
 # Ensure local project and JDet are on sys.path before importing jdet.*
@@ -64,6 +65,17 @@ def parse_args():
         action="store_true",
         help="do not load existing --out file and always recompute all settings",
     )
+    parser.add_argument(
+        "--det-out-dir",
+        default=None,
+        help="directory to save per-corruption detection boxes "
+             "(default: <dirname(--out)>/det_boxes)",
+    )
+    parser.add_argument(
+        "--no-save-det-boxes",
+        action="store_true",
+        help="disable saving per-corruption detection json files",
+    )
     parser.add_argument("--no_cuda", action="store_true")
     return parser.parse_args()
 
@@ -88,6 +100,99 @@ def _run_eval(model, dataset, work_dir, epoch):
         results.extend([(r, t) for r, t in zip(sync(result), sync(targets))])
     eval_results = dataset.evaluate(results, work_dir, epoch, logger="print")
     return eval_results, results
+
+
+def _det_json_path(det_out_dir, corruption, severity):
+    return os.path.join(det_out_dir, corruption, f"severity_{severity}.json")
+
+
+def _det_meta_path(det_out_dir, corruption, severity):
+    return os.path.join(det_out_dir, corruption, f"severity_{severity}.meta.json")
+
+
+def _update_det_index(det_out_dir, record):
+    index_path = os.path.join(det_out_dir, "index.json")
+    index_data = {}
+    if os.path.exists(index_path):
+        try:
+            with open(index_path, "r") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                index_data = raw
+        except Exception:
+            index_data = {}
+    key = f"{record['corruption']}|{record['severity']}"
+    index_data[key] = record
+    with open(index_path, "w") as f:
+        json.dump(index_data, f, indent=2)
+
+
+def _save_detection_boxes(dataset, results, det_out_dir, corruption, severity, ann_file):
+    pred_path = _det_json_path(det_out_dir, corruption, severity)
+    meta_path = _det_meta_path(det_out_dir, corruption, severity)
+    os.makedirs(os.path.dirname(pred_path), exist_ok=True)
+    dataset.save_results(results, pred_path)
+    num_preds = 0
+    for result, _ in results:
+        boxes = result.get("boxes", None)
+        if boxes is None:
+            continue
+        if hasattr(boxes, "shape"):
+            num_preds += int(boxes.shape[0])
+        elif hasattr(boxes, "__len__"):
+            num_preds += len(boxes)
+
+    vis_out = os.path.join(det_out_dir, "vis", corruption, f"severity_{severity}")
+    record = {
+        "corruption": corruption,
+        "severity": int(severity),
+        "pred_file": os.path.relpath(pred_path, det_out_dir),
+        "ann_file": ann_file,
+        "img_root": getattr(dataset, "root", None),
+        "num_images": len(dataset),
+        "num_preds": num_preds,
+        "vis_command": (
+            "python jdet_cityscapes/tools/vis_coco_boxes.py "
+            f"--ann-file \"{ann_file}\" "
+            f"--img-root \"{getattr(dataset, 'root', '')}\" "
+            f"--pred-file \"{pred_path}\" "
+            f"--mode both --out-dir \"{vis_out}\""
+        ),
+    }
+    with open(meta_path, "w") as f:
+        json.dump(record, f, indent=2)
+    _update_det_index(det_out_dir, record)
+    return pred_path
+
+
+def _copy_detection_boxes(det_out_dir, src_corr, src_sev, dst_corr, dst_sev, ann_file, img_root):
+    src_json = _det_json_path(det_out_dir, src_corr, src_sev)
+    dst_json = _det_json_path(det_out_dir, dst_corr, dst_sev)
+    if not os.path.exists(src_json):
+        return None
+    os.makedirs(os.path.dirname(dst_json), exist_ok=True)
+    shutil.copyfile(src_json, dst_json)
+    meta_path = _det_meta_path(det_out_dir, dst_corr, dst_sev)
+    vis_out = os.path.join(det_out_dir, "vis", dst_corr, f"severity_{dst_sev}")
+    record = {
+        "corruption": dst_corr,
+        "severity": int(dst_sev),
+        "pred_file": os.path.relpath(dst_json, det_out_dir),
+        "ann_file": ann_file,
+        "img_root": img_root,
+        "copied_from": f"{src_corr}|{src_sev}",
+        "vis_command": (
+            "python jdet_cityscapes/tools/vis_coco_boxes.py "
+            f"--ann-file \"{ann_file}\" "
+            f"--img-root \"{img_root}\" "
+            f"--pred-file \"{dst_json}\" "
+            f"--mode both --out-dir \"{vis_out}\""
+        ),
+    }
+    with open(meta_path, "w") as f:
+        json.dump(record, f, indent=2)
+    _update_det_index(det_out_dir, record)
+    return dst_json
 
 
 def _load_existing_results(path):
@@ -129,6 +234,14 @@ def main():
             cfg.model["pretrained"] = None
             if "backbone" in cfg.model and isinstance(cfg.model["backbone"], dict):
                 cfg.model["backbone"]["pretrained"] = None
+
+    save_det_boxes = not args.no_save_det_boxes
+    det_out_dir = args.det_out_dir
+    if det_out_dir is None:
+        det_out_dir = os.path.join(os.path.dirname(os.path.abspath(args.out)), "det_boxes")
+    if save_det_boxes:
+        os.makedirs(det_out_dir, exist_ok=True)
+        print(f"Detection boxes will be saved to: {det_out_dir}")
 
     if "all" in args.corruptions:
         corruptions = [
@@ -174,6 +287,7 @@ def main():
             aggregated_results = {}
 
     model = _load_model(cfg, args.checkpoint)
+    saved_det_paths = {}
 
     for corr_i, corruption in enumerate(corruptions):
         if corruption not in aggregated_results:
@@ -181,6 +295,29 @@ def main():
         for severity in args.severities:
             if severity in aggregated_results[corruption]:
                 print(f"\nSkipping {corruption} at severity {severity} (already done)")
+                if save_det_boxes:
+                    expected = _det_json_path(det_out_dir, corruption, severity)
+                    if os.path.exists(expected):
+                        saved_det_paths[(corruption, severity)] = expected
+                    elif corr_i > 0 and severity == 0:
+                        test_cfg = copy.deepcopy(cfg.dataset.test)
+                        ann_file = test_cfg.get("anno_file", None)
+                        img_root = test_cfg.get("root", None)
+                        recovered = _copy_detection_boxes(
+                            det_out_dir,
+                            src_corr=corruptions[0],
+                            src_sev=0,
+                            dst_corr=corruption,
+                            dst_sev=0,
+                            ann_file=ann_file,
+                            img_root=img_root,
+                        )
+                        if recovered is not None:
+                            saved_det_paths[(corruption, severity)] = recovered
+                            print(
+                                f"[det] recovered {corruption}/severity_{severity} "
+                                f"from {corruptions[0]}/severity_0"
+                            )
                 continue
 
             if corr_i > 0 and severity == 0:
@@ -191,6 +328,22 @@ def main():
                         f"\nSkipping {corruption} at severity 0 "
                         f"(reusing clean result from {corruptions[0]})"
                     )
+                    if save_det_boxes:
+                        test_cfg = copy.deepcopy(cfg.dataset.test)
+                        ann_file = test_cfg.get("anno_file", None)
+                        img_root = test_cfg.get("root", None)
+                        copied = _copy_detection_boxes(
+                            det_out_dir,
+                            src_corr=corruptions[0],
+                            src_sev=0,
+                            dst_corr=corruption,
+                            dst_sev=0,
+                            ann_file=ann_file,
+                            img_root=img_root,
+                        )
+                        if copied is not None:
+                            saved_det_paths[(corruption, severity)] = copied
+                            print(f"[det] copied clean boxes -> {copied}")
                     with open(args.out, "w") as f:
                         json.dump(aggregated_results, f, indent=2)
                     continue
@@ -242,10 +395,25 @@ def main():
 
             eval_results, results = _run_eval(model, dataset, cfg.work_dir, severity)
             aggregated_results[corruption][severity] = {"bbox": eval_results}
+            saved_det_json = None
+            if save_det_boxes:
+                ann_file = test_cfg.get("anno_file", None)
+                saved_det_json = _save_detection_boxes(
+                    dataset=dataset,
+                    results=results,
+                    det_out_dir=det_out_dir,
+                    corruption=corruption,
+                    severity=severity,
+                    ann_file=ann_file,
+                )
+                saved_det_paths[(corruption, severity)] = saved_det_json
+                print(f"[det] saved: {saved_det_json}")
             # diagnostics: count predicted boxes and preview json
             try:
                 # build json from eval save file created in evaluate
-                det_json = os.path.join(cfg.work_dir, "detections", f"val_{severity}.json")
+                det_json = saved_det_json
+                if det_json is None or (not os.path.exists(det_json)):
+                    det_json = os.path.join(cfg.work_dir, "detections", f"val_{severity}.json")
                 if os.path.exists(det_json):
                     with open(det_json, "r") as f:
                         dets = json.load(f)
