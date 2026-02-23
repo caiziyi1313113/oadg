@@ -1,5 +1,8 @@
-## 目录
-### 目录结构
+## 项目介绍
+本项目聚焦自动驾驶场景下的鲁棒目标检测与域泛化问题，围绕 OA-DG 方法构建了可复现的训练与评测流程。基于 Jittor 框架实现，项目集成了 Object-Aware 的数据增强策略 OAMix，以及结合多视图一致性与对比学习的 OA-Loss，以提升模型在天气变化、图像腐蚀和跨域分布偏移条件下的检测稳定性。
+在 Object-Aware 的数据增强策略下，进一步引入频域解耦增强（FDD）：通过 FFT→1x1Conv→ReLU→1x1Conv→IFFT 的频域滤波路径自适应调制幅值响应，将输入分解为域不变成分与域相关成分，并结合图像级与实例级对比约束，提升目标语义一致性、抑制天气/光照/噪声引起的风格偏移，从而显著增强模型在跨域与 Cityscapes-C 腐蚀场景下的检测鲁棒性。
+
+## 项目结构
 
 ```text
 ├── JDet/ 
@@ -139,7 +142,5 @@ python jdet_cityscapes/tools/compute_cityscapes_c_metrics.py \
   jdet_cityscapes/work_dirs/faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg_oamix/robustness_last.json \
   --output jdet_cityscapes/work_dirs/faster_rcnn_r50_fpn_cityscapes_coco_jdet_oadg_oamix/robustness_last_mpc.json
 ```
-
-
-
-
+## 数据展示
+![jittor上基线-oamix-oadg](./picture/table.png)
